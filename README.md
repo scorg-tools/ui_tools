@@ -147,64 +147,27 @@ def threaded_progress_example(context):
     from . import ui_tools
     import time
     
-    # 1. Create Popup with prevent_close=True, blocking=True prevents interacting with the viewport while running
-    popup = ui_tools.Popup("Processing...", prevent_close=True, blocking=True)
-    
-    # 2. Add Progress Bar
-    progress = ui_tools.ProgressBar(text="Initializing...")
-    popup.add_widget(progress)
-    
-    # 3. Optional: Add a Cancel Button
-    # def on_cancel():
-    #     popup.cancelled = True # Signal cancellation
-        
-    # Keep reference to button to change it later
-    # cancel_btn = ui_tools.Button("Force Cancel", callback=on_cancel)
-    # popup.add_widget(cancel_btn)
-    
-    popup.show()
-    
-    # 4. Start Thread Manager
+    # 1. Start Thread Manager
     tm = ui_tools.ThreadManager()
     tm.start()
     
-    # 5. Define Background Task
+    # 2. Define Background Task
     def background_task():
         try:
             for i in range(101):
-                # Check for cancellation
-                if popup.cancelled:
-                    return
-                    
-                # Update progress
-                progress.update(i, 100, f"Processing item {i}...")
+                # Update progress using simplified API
+                ui_tools.progress_bar_popup("my_task", i, 100, f"Processing item {i}...")
                 
                 # Simulate work - add your code here
                 time.sleep(0.05)
-                
-            # Finish
-            progress.update(100, 100, "Done!")
-            time.sleep(0.5)
             
-            # Allow closing
-            popup.prevent_close = False
-            popup.add_close_button()
-            
-            # Optional: to auto-close the popup after the task is finished
-            # popup.finished = True
-            
-            # Optional: Change Cancel button to Close
-            # cancel_btn.text = "Close"
-            # cancel_btn.callback = lambda: setattr(popup, 'finished', True)
-            
-            # Optional: Trigger redraw to show button change
-            # progress.update(100, 100, "Done!") 
+            # When finished (reaches 100%), close button appears automatically
+            ui_tools.progress_bar_popup("my_task", 100, 100, "Done!")
             
         except Exception as e:
             print(f"Error: {e}")
-            popup.prevent_close = False
-
-    # 6. Submit Task
+    
+    # 3. Submit Task
     tm.submit(background_task)
 ```
 

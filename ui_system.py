@@ -117,13 +117,19 @@ class Label(Widget):
         else:
             self.lines = [] # Fallback to unwrapped
             
-        # Trigger redraw
+        # Trigger redraw safely
+        def trigger_redraw():
+            try:
+                for window in bpy.context.window_manager.windows:
+                    for area in window.screen.areas:
+                        area.tag_redraw()
+            except:
+                pass
+        
         try:
-            for window in bpy.context.window_manager.windows:
-                for area in window.screen.areas:
-                    area.tag_redraw()
+            trigger_redraw()
         except:
-            pass
+            bpy.app.timers.register(trigger_redraw)
 
     def update_layout_custom(self, available_width):
         self.last_available_width = available_width
@@ -131,11 +137,6 @@ class Label(Widget):
         # We need to use BLF to measure text width
         blf.size(self.font_id, self.font_size, 72)
         
-        # Get scale for measurement (since available_width is in unscaled pixels? 
-        # No, Widget.width is unscaled. scaled_width is scaled.
-        # available_width passed from Popup is unscaled (self.width).
-        # But BLF works in pixels.
-        # So we need to scale available_width to pixels for measurement.
         ui_scale = get_ui_scale()
         pixel_width = available_width * ui_scale
         
@@ -149,9 +150,6 @@ class Label(Widget):
                 self.lines.append("")
                 continue
                 
-            # Wrap each paragraph
-            # We can't use textwrap directly because it works on character count, not pixel width.
-            # We need a custom wrapper or iterative approach.
             words = p.split(' ')
             current_line = []
             current_width = 0
@@ -673,9 +671,11 @@ class ProgressBar(Widget):
         self.last_update_time = 0
         self.update_interval = 0.1 # Throttle redraws
 
-    def update(self, current, max_value=None, text=None):
+    def update(self, current, max_value=None, text=None, force_redraw=False):
         """
         Update progress bar state. Thread-safe.
+        Args:
+            force_redraw: If True, forces an immediate UI redraw (useful for blocking scripts).
         """
         import time
         self.current = current
@@ -686,18 +686,31 @@ class ProgressBar(Widget):
             
         # Throttle redraws
         now = time.time()
-        if now - self.last_update_time > self.update_interval or self.current >= self.max_value:
+        if now - self.last_update_time > self.update_interval or self.current >= self.max_value or force_redraw:
             self.last_update_time = now
+            
             # Trigger redraw safely
-            # We can't easily get context here from a thread, but we can try to tag all areas
-            # Or rely on the modal operator's timer.
-            # For now, let's try to tag redraw if possible, but catch errors
+            def trigger_redraw():
+                try:
+                    # Standard tag_redraw first to mark areas as dirty
+                    for window in bpy.context.window_manager.windows:
+                        for area in window.screen.areas:
+                            area.tag_redraw()
+                            
+                    # If forced, try to force immediate redraw (hack for blocking scripts)
+                    if force_redraw:
+                        try:
+                            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+                        except:
+                            pass
+                except:
+                    pass
+            
             try:
-                for window in bpy.context.window_manager.windows:
-                    for area in window.screen.areas:
-                        area.tag_redraw()
+                trigger_redraw()
             except:
-                pass
+                # Fallback for threads where context is missing
+                bpy.app.timers.register(trigger_redraw)
 
     def update_layout_custom(self, available_width):
         ui_scale = get_ui_scale()
@@ -839,6 +852,14 @@ class Popup(Widget):
     
     def show(self):
         """Show this popup (calls show_popup and returns self for chaining)."""
+        import threading
+        import bpy
+        
+        # If called from a background thread, schedule on main thread
+        if threading.current_thread() is not threading.main_thread():
+            bpy.app.timers.register(lambda: self.show())
+            return self
+            
         from .operators import show_popup
         show_popup(self)
         return self

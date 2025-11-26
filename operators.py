@@ -72,6 +72,7 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
         )
         
         context.window_manager.modal_handler_add(self)
+        context.area.tag_redraw() # Request initial redraw
         return {'RUNNING_MODAL'}
 
     def draw_callback(self, context):
@@ -96,6 +97,12 @@ def show_popup(popup_instance):
     global active_popup
     active_popup = popup_instance
     bpy.ops.uitools.custom_popup('INVOKE_DEFAULT')
+    
+    # Force immediate redraw to ensure popup appears before any blocking code
+    try:
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+    except:
+        pass
 
 classes = (
     UITOOLS_OT_custom_popup,
