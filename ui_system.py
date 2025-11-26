@@ -843,6 +843,29 @@ class Popup(Widget):
         show_popup(self)
         return self
 
+    def add_close_button(self, text="OK"):
+        """
+        Add a close button to the popup. Useful when prevent_close was True initially.
+        
+        Args:
+            text: Button text (default: "OK")
+        """
+        def default_ok():
+            self.finished = True
+        
+        close_button = Button(text, callback=default_ok)
+        self.add_widget(close_button)
+        
+        # Set as Enter shortcut if not already set
+        if not self.on_enter:
+            self.on_enter = default_ok
+        
+        # Re-layout to recalculate height and positions
+        # layout_children() handles height expansion and repositioning automatically
+        self.layout_children()
+        
+        return close_button
+
     def layout_children(self):
         # Update title_height with scale
         self.title_height = int(45 * get_ui_scale())
@@ -961,7 +984,7 @@ class Popup(Widget):
         return self.y
 
     def update_layout(self, context):
-        # Add default OK button if no buttons exist
+        # Add default OK button if no buttons exist and prevent_close is False
         has_button = False
         for child in self.children:
             if isinstance(child, Button):
@@ -974,8 +997,8 @@ class Popup(Widget):
                         has_button = True
                         break
         
-        # Add default OK button if none found
-        if not has_button:
+        # Only add default OK button if none found AND prevent_close is False
+        if not has_button and not self.prevent_close:
             def default_ok():
                 self.finished = True
             
