@@ -147,15 +147,18 @@ def threaded_progress_example(context):
     from . import ui_tools
     import time
     
-    # 1. Start Thread Manager
+    # 1. Initialize progress bar from main thread (IMPORTANT!)
+    ui_tools.progress_bar_popup("my_task", 0, 100, "Initializing...")
+    
+    # 2. Start Thread Manager
     tm = ui_tools.ThreadManager()
     tm.start()
     
-    # 2. Define Background Task
+    # 3. Define Background Task
     def background_task():
         try:
-            for i in range(101):
-                # Update progress using simplified API
+            for i in range(1, 101):
+                # Update progress from background thread
                 ui_tools.progress_bar_popup("my_task", i, 100, f"Processing item {i}...")
                 
                 # Simulate work - add your code here
@@ -167,7 +170,7 @@ def threaded_progress_example(context):
         except Exception as e:
             print(f"Error: {e}")
     
-    # 3. Submit Task
+    # 4. Submit Task
     tm.submit(background_task)
 ```
 
