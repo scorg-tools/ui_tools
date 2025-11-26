@@ -104,8 +104,29 @@ class Label(Widget):
         self.font_id = 0
         self.lines = []
         self.line_height = 0
+        self.last_available_width = width # Default fallback
+
+    def update(self, text):
+        """
+        Update label text. Thread-safe.
+        """
+        self.text = text
+        # Re-calculate layout if we have width info
+        if self.last_available_width:
+            self.update_layout_custom(self.last_available_width)
+        else:
+            self.lines = [] # Fallback to unwrapped
+            
+        # Trigger redraw
+        try:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    area.tag_redraw()
+        except:
+            pass
 
     def update_layout_custom(self, available_width):
+        self.last_available_width = available_width
         # Wrap text to fit available width
         # We need to use BLF to measure text width
         blf.size(self.font_id, self.font_size, 72)

@@ -205,6 +205,75 @@ def threaded_progress_example(context):
     tm.submit(background_task)
 ```
 
+### Multi-threaded Batch Processing
+Process multiple items in parallel using the thread pool.
+
+```python
+def batch_processing_example(context):
+    from . import ui_tools
+    import time
+    import random
+    
+    # 1. Create Popup
+    popup = ui_tools.Popup("Batch Processing", prevent_close=True)
+    
+    # 2. Add Progress Bar
+    progress = ui_tools.ProgressBar(text="Processing items...")
+    popup.add_widget(progress)
+    
+    # 3. Add Status Label
+    status_label = ui_tools.Label("Ready to start...")
+    popup.add_widget(status_label)
+    
+    popup.show()
+    
+    # 4. Start Thread Manager
+    tm = ui_tools.ThreadManager() # Defaults to CPU count or 4 workers
+    
+    # 5. Define Worker Function
+    def process_item(item_id):
+        # Simulate work with random duration - Your code goes here
+        time.sleep(random.uniform(0.5, 3.0))
+        print(f"Finished item: {item_id}")
+        return f"item {item_id}"
+        
+    # 6. Define Items to Process
+    items = list(range(30))
+    
+    # 7. Process Batch
+    # The progress callback is called automatically as threads finish
+    futures = tm.process_batch(
+        process_item, 
+        items, 
+        progress_callback=lambda current, total: progress.update(
+            current, total, f"Processed {current}/{total}"
+        )
+    )
+    
+    # 8. Update Label on Completion of each item
+    def on_item_done(future):
+        try:
+            result = future.result()
+            status_label.update(f"Last finished: {result}")
+        except Exception as e:
+            print(f"Task failed: {e}")
+            
+    for f in futures:
+        f.add_done_callback(on_item_done)
+    
+    # 9. Handle Completion (Optional)
+    def on_all_done(future):
+        # This runs when the *last* submitted task finishes
+        if all(f.done() for f in futures):
+            popup.prevent_close = False
+            progress.update(100, 100, "All Done!")
+            status_label.update("Batch processing complete.")
+            
+    # Attach completion check to all futures
+    for f in futures:
+        f.add_done_callback(on_all_done)
+```
+
 ### Popup
 ```python
 Popup(title, label=None, width=None, height=None, prevent_close=False, blocking=False)
@@ -225,6 +294,7 @@ Popup(title, label=None, width=None, height=None, prevent_close=False, blocking=
 Label(text)
 ```
 - Displays text with automatic wrapping
+- Use `label.update(new_text)` to dynamically update the text
 
 ### Button
 ```python

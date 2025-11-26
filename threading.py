@@ -22,7 +22,7 @@ class ThreadManager:
             try:
                 max_workers = multiprocessing.cpu_count()
             except NotImplementedError:
-                max_workers = 1
+                max_workers = 4
                 
         self.max_workers = max_workers
         self.executor = None
@@ -100,6 +100,47 @@ class ThreadManager:
         self.futures = [f for f in self.futures if not f.done()]
         
         return future
+
+    def process_batch(self, func, items, progress_callback=None):
+        """
+        Process a batch of items using the thread pool.
+        
+        Args:
+            func (callable): The function to execute for each item. 
+                             Should accept a single argument (the item).
+            items (list): List of items to process.
+            progress_callback (callable, optional): Callback function to report progress.
+                                                    Signature: callback(current, total)
+                                                    
+        Returns:
+            list: List of futures representing the tasks.
+        """
+        if self.executor is None:
+            self.start()
+            
+        futures = []
+        total = len(items)
+        completed_count = 0
+        lock = threading.Lock()
+        
+        def done_callback(future):
+            nonlocal completed_count
+            with lock:
+                completed_count += 1
+                current = completed_count
+                
+            if progress_callback:
+                try:
+                    progress_callback(current, total)
+                except Exception as e:
+                    print(f"Error in progress callback: {e}")
+
+        for item in items:
+            future = self.submit(func, item)
+            future.add_done_callback(done_callback)
+            futures.append(future)
+            
+        return futures
 
     def shutdown(self):
         """Alias for stop."""
