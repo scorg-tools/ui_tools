@@ -736,13 +736,36 @@ class ProgressBar(Widget):
             blf.size(0, font_size, 72)
             text_width, text_height = blf.dimensions(0, display_text)
             
-            text_x = self.global_x + (self.scaled_width - text_width) / 2
+            # Add padding for text area
+            text_padding = int(10 * ui_scale)
+            available_width = self.scaled_width - (2 * text_padding)
+            
+            # Check if text overflows
+            if text_width > available_width:
+                # Right-align text and clip overflow on the left
+                text_x = self.global_x + self.scaled_width - text_padding - text_width
+            else:
+                # Center text normally
+                text_x = self.global_x + (self.scaled_width - text_width) / 2
+                
             center_y = self.global_y + (self.scaled_height / 2)
             text_y = center_y - (text_height / 3)
+            
+            # Enable clipping for the text area
+            scissor_x = int(self.global_x + text_padding)
+            scissor_y = int(self.global_y)
+            scissor_w = int(available_width)
+            scissor_h = int(self.scaled_height)
+            
+            gpu.state.scissor_set(scissor_x, scissor_y, scissor_w, scissor_h)
+            gpu.state.scissor_test_set(True)
             
             blf.color(0, *self.text_color)
             blf.position(0, text_x, text_y, 0)
             blf.draw(0, display_text)
+            
+            # Disable scissor test
+            gpu.state.scissor_test_set(False)
 
 class WidgetBuilder:
     def __init__(self, parent):
