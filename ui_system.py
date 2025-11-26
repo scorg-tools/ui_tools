@@ -204,10 +204,10 @@ class Button(Widget):
         super().__init__(x, y, width, height, parent)
         self.text = text
         self.callback = callback
-        self.bg_color = (0.2, 0.2, 0.2, 1.0)
-        self.hover_color = (0.3, 0.3, 0.3, 1.0)
-        self.active_color = (0.1, 0.1, 0.1, 1.0)
-        self.text_color = (1, 1, 1, 1)
+        self.bg_color = get_theme_color(lambda t: t.user_interface.wcol_regular.inner)
+        self.hover_color = get_theme_color(lambda t: t.user_interface.wcol_regular.inner_sel)
+        self.active_color = get_theme_color(lambda t: t.user_interface.wcol_regular.item)
+        self.text_color = get_theme_color(lambda t: t.user_interface.wcol_regular.text)
         self.active = False
         self.padding = 10
         self.font_size_mult = 1.8
@@ -290,11 +290,11 @@ class TextInput(Widget):
     def __init__(self, text="", parent=None, x=0, y=0, width=100, height=30):
         super().__init__(x, y, width, height, parent)
         self.text = text
-        # Hardcode colors to match request/screenshot
-        self.bg_color = (0.05, 0.05, 0.05, 1.0) # Dark search box style
-        self.focus_color = (0.05, 0.05, 0.05, 1.0)
-        self.text_color = (0.9, 0.9, 0.9, 1.0) # Light text
-        self.selection_color = (0.2, 0.4, 0.8, 0.5) # Blue highlight
+        # Use theme colors
+        self.bg_color = get_theme_color(lambda t: t.user_interface.wcol_text.inner)
+        self.focus_color = get_theme_color(lambda t: t.user_interface.wcol_text.inner)
+        self.text_color = get_theme_color(lambda t: t.user_interface.wcol_text.text)
+        self.selection_color = get_theme_color(lambda t: t.user_interface.wcol_text.text_sel)
         
         self.cursor_pos = len(text)
         self.selection_start = None # Start index of selection
@@ -665,9 +665,9 @@ class ProgressBar(Widget):
         self.show_percentage = show_percentage
         self.show_values = show_values
         
-        self.bg_color = (0.1, 0.1, 0.1, 1.0)
-        self.fill_color = (0.2, 0.6, 1.0, 1.0) # Blue
-        self.text_color = (1, 1, 1, 1)
+        self.bg_color = get_theme_color(lambda t: t.user_interface.wcol_progress.inner)
+        self.fill_color = get_theme_color(lambda t: t.user_interface.wcol_progress.item)
+        self.text_color = get_theme_color(lambda t: t.user_interface.wcol_progress.text)
         self.padding = 5
         self.font_size_mult = 1.5
         self.last_update_time = 0
@@ -796,8 +796,8 @@ class Popup(Widget):
         super().__init__(0, 0, width if width else 400, height if height else 300)
         self.title = title
         self.children = []
-        self.bg_color = (0.15, 0.15, 0.15, 0.95)
-        self.border_color = (0.4, 0.4, 0.4, 1.0)
+        self.bg_color = get_theme_color(lambda t: (*t.user_interface.wcol_menu_back.inner[:3], 0.95))
+        self.border_color = get_theme_color(lambda t: t.user_interface.wcol_menu_back.outline)
         self.finished = False
         self.cancelled = False
         self.on_enter = None
@@ -997,8 +997,7 @@ class Popup(Widget):
 
     def draw(self, context):
         # Draw background
-        # Revert to hardcoded dark grey as requested
-        bg_color = (0.15, 0.15, 0.15, 0.95)
+        bg_color = self.bg_color
         
         draw_rect(self.global_x, self.global_y, self.scaled_width, self.scaled_height, bg_color)
         draw_rect_border(self.global_x, self.global_y, self.scaled_width, self.scaled_height, self.border_color, 2)
@@ -1011,8 +1010,8 @@ class Popup(Widget):
         header_height = int(45 * ui_scale)
         header_y = self.global_y + self.scaled_height - header_height
         
-        # Header color (Medium Grey)
-        header_color = (0.3, 0.3, 0.3, 1.0)
+        # Header color from theme
+        header_color = get_theme_color(lambda t: t.user_interface.wcol_menu.inner)
         
         draw_rect(self.global_x, header_y, self.scaled_width, header_height, header_color)
         
@@ -1024,7 +1023,9 @@ class Popup(Widget):
         
         title_width, title_height = blf.dimensions(0, self.title)
         title_x = self.global_x + (self.margin * ui_scale)
-        title_y = header_y + (header_height - title_height) / 2 + (5 * ui_scale)
+        # Center vertically: header center Y minus text height adjustment for baseline
+        center_y = header_y + (header_height / 2)
+        title_y = center_y - (title_height / 3)
         
         blf.position(0, title_x, title_y, 0)
         blf.draw(0, self.title)
