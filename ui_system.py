@@ -158,16 +158,43 @@ class Label(Widget):
             for word in words:
                 word_width = blf.dimensions(self.font_id, word)[0]
                 
-                if current_line and (current_width + space_width + word_width) > pixel_width:
-                    # Start new line
-                    self.lines.append(" ".join(current_line))
-                    current_line = [word]
-                    current_width = word_width
+                if word_width > pixel_width:
+                    # Split long word into chunks that fit
+                    chunks = []
+                    start = 0
+                    while start < len(word):
+                        end = start + 1
+                        while end <= len(word) and blf.dimensions(self.font_id, word[start:end])[0] <= pixel_width:
+                            end += 1
+                        end -= 1
+                        if end == start:
+                            end = start + 1  # At least one char
+                        chunks.append(word[start:end])
+                        start = end
+                    
+                    # Treat chunks as words
+                    for chunk in chunks:
+                        chunk_width = blf.dimensions(self.font_id, chunk)[0]
+                        if current_line and (current_width + space_width + chunk_width) > pixel_width:
+                            self.lines.append(" ".join(current_line))
+                            current_line = [chunk]
+                            current_width = chunk_width
+                        else:
+                            if current_line:
+                                current_width += space_width
+                            current_line.append(chunk)
+                            current_width += chunk_width
                 else:
-                    if current_line:
-                        current_width += space_width
-                    current_line.append(word)
-                    current_width += word_width
+                    # Normal word
+                    if current_line and (current_width + space_width + word_width) > pixel_width:
+                        self.lines.append(" ".join(current_line))
+                        current_line = [word]
+                        current_width = word_width
+                    else:
+                        if current_line:
+                            current_width += space_width
+                        current_line.append(word)
+                        current_width += word_width
             
             if current_line:
                 self.lines.append(" ".join(current_line))
