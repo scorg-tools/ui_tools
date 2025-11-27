@@ -13,7 +13,7 @@ OPERATOR_PREFIX = "uitools"
 class UITOOLS_OT_custom_popup(bpy.types.Operator):
     bl_idname = "uitools.custom_popup"
     bl_label = "Custom Popup"
-    bl_options = {'REGISTER', 'INTERNAL'}
+    bl_options = {'REGISTER', 'BLOCKING'}
 
     def __init__(self):
         self.draw_handler = None
@@ -27,13 +27,40 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             return {'CANCELLED'}
 
         # Force redraw to keep UI updated
-        context.area.tag_redraw()
+        if self.area:
+            self.area.tag_redraw()
+        else:
+            # Fallback if no area stored
+            if context.area:
+                context.area.tag_redraw()
+            else:
+                # Find an area to redraw when context.area is None
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            area.tag_redraw()
+                            break
+                    else:
+                        continue
+                    break
 
         if event.type == 'TIMER':
             return {'PASS_THROUGH'}
 
         # Pass event to popup
-        handled = active_popup.handle_event(event, context)
+        # Translate coordinates if the layout region differs from the event region
+        if hasattr(self, 'layout_region') and self.layout_region and context.region and self.layout_region != context.region:
+            # Translate mouse coordinates from event region to layout region
+            original_mouse_x = event.mouse_region_x
+            original_mouse_y = event.mouse_region_y
+            event.mouse_region_x = event.mouse_region_x + (context.region.x - self.layout_region.x)
+            event.mouse_region_y = event.mouse_region_y + (context.region.y - self.layout_region.y)
+            handled = active_popup.handle_event(event, context)
+            # Restore original coordinates
+            event.mouse_region_x = original_mouse_x
+            event.mouse_region_y = original_mouse_y
+        else:
+            handled = active_popup.handle_event(event, context)
         
         # Check if popup wants to close
         if active_popup.finished:
@@ -68,9 +95,30 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             
             # Add draw handler to the current space
             self.space = context.space_data
+            self.area = context.area  # Store the original area
             if self.space is None:
-                self.report({'ERROR'}, "No space available for popup")
-                return {'CANCELLED'}
+                # Try to find an available space when context.space_data is None
+                # This can happen when called from timers or background threads
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            self.space = area.spaces[0]
+                            self.area = area  # Store the found area
+                            break
+                    if self.space:
+                        break
+                if self.space is None:
+                    for window in context.window_manager.windows:
+                        for area in window.screen.areas:
+                            if area.type in ('TEXT_EDITOR', 'CONSOLE'):
+                                self.space = area.spaces[0]
+                                self.area = area  # Store the found area
+                                break
+                        if self.space:
+                            break
+                if self.space is None:
+                    self.report({'ERROR'}, "No space available for popup")
+                    return {'CANCELLED'}
             
             self.draw_handler = self.space.draw_handler_add(
                 self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
@@ -79,6 +127,20 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             context.window_manager.modal_handler_add(self)
             if context.area:
                 context.area.tag_redraw() # Request initial redraw
+            
+            # Update layout with the appropriate region
+            layout_context = context
+            self.layout_region = context.region  # Store the region used for layout
+            if self.area and self.area != context.area and self.area.regions:
+                # Create a modified context with the correct region for layout
+                layout_context = type('Context', (), {})()
+                for attr in dir(context):
+                    if not attr.startswith('_'):
+                        setattr(layout_context, attr, getattr(context, attr))
+                layout_context.region = self.area.regions[-1]
+                self.layout_region = layout_context.region  # Store the actual region used
+            active_popup.update_layout(layout_context)
+            
             return {'RUNNING_MODAL'}
         except Exception as e:
             print(f"Failed to show popup: {e}")
@@ -87,6 +149,8 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
     def draw_callback(self, context):
         global active_popup
         if active_popup:
+            # Layout is set once in invoke, no need to update every frame
+            active_popup.draw(context)
             active_popup.draw(context)
 
     def remove_handler(self, context):
@@ -94,8 +158,12 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             self.space.draw_handler_remove(self.draw_handler, 'WINDOW')
             self.draw_handler = None
             self.space = None
-        if context.area:
-            context.area.tag_redraw()
+        if self.area:
+            self.area.tag_redraw()
+        else:
+            # Fallback if no area stored
+            if context.area:
+                context.area.tag_redraw()
 
 def show_popup(popup_instance):
     """

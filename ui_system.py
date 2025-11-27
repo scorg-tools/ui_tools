@@ -674,9 +674,16 @@ class Row(Widget):
             child.draw()
 
     def handle_event(self, event):
+        # Get corrected mouse coordinates for hover updates
+        mx = event.mouse_region_x
+        my = event.mouse_region_y
+        if mx == -1 and hasattr(active_popup, 'last_mouse_x'):
+            mx = active_popup.last_mouse_x
+            my = active_popup.last_mouse_y
+
         for child in self.children:
             # Update hover for children
-            child.hover = child.is_inside(event.mouse_region_x, event.mouse_region_y)
+            child.hover = child.is_inside(mx, my)
             if child.handle_event(event):
                 return True
         return False
@@ -1181,9 +1188,16 @@ class Popup(Widget):
             draw_rect(track_x, thumb_y, track_width, thumb_height, (0.4, 0.4, 0.4, 1.0))
 
     def handle_event(self, event, context):
+        # Get corrected mouse coordinates for hover updates
+        mx = event.mouse_region_x
+        my = event.mouse_region_y
+        if mx == -1 and hasattr(active_popup, 'last_mouse_x'):
+            mx = active_popup.last_mouse_x
+            my = active_popup.last_mouse_y
+
         # Update hover for all children
         for child in self.children:
-            child.hover = child.is_inside(event.mouse_region_x, event.mouse_region_y)
+            child.hover = child.is_inside(mx, my)
 
         # Handle dragging
         if event.type == 'LEFTMOUSE':
@@ -1270,6 +1284,11 @@ class Popup(Widget):
         # Pass event to children
         for child in reversed(self.children):
             if child.handle_event(event):
+                return True
+
+        # Consume mouse events if they occur within the popup area
+        if event.type in ('LEFTMOUSE', 'RIGHTMOUSE', 'MIDDLEMOUSE') and event.value == 'PRESS':
+            if self.is_inside(event.mouse_region_x, event.mouse_region_y):
                 return True
 
         # Handle Enter key (OK)
