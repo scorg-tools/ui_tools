@@ -374,7 +374,41 @@ class TextInput(Widget):
                 
                 token_width = blf.dimensions(0, token)[0]
                 
-                if current_line_tokens and (current_line_width + token_width) > text_area_width:
+                # If token itself is too wide, break it into chunks
+                if token_width > text_area_width:
+                    # Break into character chunks that fit
+                    chunks = []
+                    start = 0
+                    while start < len(token):
+                        end = start + 1
+                        while end <= len(token) and blf.dimensions(0, token[start:end])[0] <= text_area_width:
+                            end += 1
+                        end -= 1
+                        if end == start:
+                            end = start + 1  # At least one char
+                        chunks.append(token[start:end])
+                        start = end
+                    
+                    # Process each chunk
+                    for chunk in chunks:
+                        chunk_width = blf.dimensions(0, chunk)[0]
+                        if current_line_tokens and (current_line_width + chunk_width) > text_area_width:
+                            # Finish current line
+                            line_text = "".join(current_line_tokens)
+                            self.lines.append({
+                                'text': line_text,
+                                'start': line_start_index,
+                                'end': line_start_index + len(line_text)
+                            })
+                            
+                            # Start new line
+                            current_line_tokens = [chunk]
+                            current_line_width = chunk_width
+                            line_start_index += len(line_text)
+                        else:
+                            current_line_tokens.append(chunk)
+                            current_line_width += chunk_width
+                elif current_line_tokens and (current_line_width + token_width) > text_area_width:
                     # Finish current line
                     line_text = "".join(current_line_tokens)
                     self.lines.append({
@@ -421,6 +455,15 @@ class TextInput(Widget):
         ui_scale = get_ui_scale()
         blf.size(0, self.font_size, 72)
         
+        # Enable BLF clipping to prevent text overflow  
+        # BLF clipping works in the current coordinate space (unlike GPU scissor)
+        blf.enable(0, blf.CLIPPING)
+        clip_xmin = self.global_x
+        clip_ymin = self.global_y
+        clip_xmax = self.global_x + self.scaled_width
+        clip_ymax = self.global_y + self.scaled_height
+        blf.clipping(0, clip_xmin, clip_ymin, clip_xmax, clip_ymax)
+        
         # Adjust vertical offset to lift text up
         # Using a smaller padding subtraction or explicitly calculating baseline
         current_y = self.global_y + self.scaled_height - self.line_height - (2 * ui_scale) 
@@ -436,6 +479,7 @@ class TextInput(Widget):
             sel_min = min(self.selection_start, self.selection_end)
             sel_max = max(self.selection_start, self.selection_end)
             has_selection = True
+
         
         for line in lines_to_draw:
             text_x = self.global_x + (self.padding * ui_scale)
@@ -483,6 +527,10 @@ class TextInput(Widget):
                 draw_rect(cursor_x, current_y - (2 * ui_scale), 2 * ui_scale, self.line_height, self.text_color)
             
             current_y -= self.line_height
+        
+        # Disable BLF clipping
+        blf.disable(0, blf.CLIPPING)
+
 
     def handle_event(self, event, mouse_x=None, mouse_y=None):
         if event.type == 'LEFTMOUSE':
