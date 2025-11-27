@@ -1,7 +1,7 @@
 """
-UI Tools - Custom Popup System for Blender Addons
+UI Tools - Custom UI Components for Blender Add-ons
 
-A lightweight library for creating custom popups with text input, buttons, and auto-layout.
+A lightweight library providing popup dialogs, progress bars, text inputs, buttons, auto-layout, and multi-threading support for Blender add-on development.
 """
 
 import time
@@ -19,6 +19,20 @@ def register(operator_prefix="uitools"):
     from . import operators
     operators.OPERATOR_PREFIX = operator_prefix
     operators.register()
+    
+    # Print ASCII art banner
+    banner = """
+\033[37mMade with ui-tools\033[0m
+\033[36m           ░██           ░██                          ░██            \033[0m
+\033[36m                         ░██                          ░██            \033[0m
+\033[36m░██    ░██ ░██        ░████████  ░███████   ░███████  ░██  ░███████  \033[0m
+\033[36m░██    ░██ ░██░██████    ░██    ░██    ░██ ░██    ░██ ░██ ░██        \033[0m
+\033[36m░██    ░██ ░██           ░██    ░██    ░██ ░██    ░██ ░██  ░███████  \033[0m
+\033[36m░██   ░███ ░██           ░██    ░██    ░██ ░██    ░██ ░██        ░██ \033[0m
+\033[36m ░█████░██ ░██            ░████  ░███████   ░███████  ░██  ░███████  \033[0m
+\033[37mscorg.tools 2026\033[0m
+"""
+    print(banner)
 
 def unregister():
     """Unregister the UI Tools operators."""
@@ -187,6 +201,23 @@ def close_progress_bar_popup(progress_id=None):
                 if not has_close_btn:
                     popup.add_close_button("Close")
 
+def clear_all_popups():
+    """
+    Clear all active popups and progress bars.
+    Useful for resetting state in tests or when switching contexts.
+    """
+    global _shared_progress_state
+    
+    # Clear active popup
+    from . import operators
+    operators.active_popup = None
+    
+    # Clear shared progress state
+    _shared_progress_state['popup'] = None
+    _shared_progress_state['bars'] = {}
+    _shared_progress_state['finished_ids'] = set()
+    _shared_progress_state['last_update'] = 0
+
 # Lazy imports using __getattr__ (Python 3.7+)
 def __getattr__(name):
     """Lazy load ui_system classes on demand."""
@@ -198,4 +229,4 @@ def __getattr__(name):
         return getattr(threading, name)
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-__all__ = ['register', 'unregister', 'show_popup', 'progress_bar_popup', 'close_progress_bar_popup', 'Popup', 'Label', 'Button', 'TextInput', 'Row', 'ProgressBar', 'ThreadManager']
+__all__ = ['register', 'unregister', 'show_popup', 'progress_bar_popup', 'close_progress_bar_popup', 'clear_all_popups', 'Popup', 'Label', 'Button', 'TextInput', 'Row', 'ProgressBar', 'ThreadManager']

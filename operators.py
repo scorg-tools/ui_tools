@@ -13,7 +13,7 @@ OPERATOR_PREFIX = "uitools"
 class UITOOLS_OT_custom_popup(bpy.types.Operator):
     bl_idname = "uitools.custom_popup"
     bl_label = "Custom Popup"
-    bl_options = {'REGISTER', 'BLOCKING'}
+    bl_options = {'REGISTER'}
 
     def __init__(self):
         self.draw_handler = None
@@ -48,19 +48,16 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         # Pass event to popup
-        # Translate coordinates if the layout region differs from the event region
-        if hasattr(self, 'layout_region') and self.layout_region and context.region and self.layout_region != context.region:
-            # Translate mouse coordinates from event region to layout region
-            original_mouse_x = event.mouse_region_x
-            original_mouse_y = event.mouse_region_y
-            event.mouse_region_x = event.mouse_region_x + (context.region.x - self.layout_region.x)
-            event.mouse_region_y = event.mouse_region_y + (context.region.y - self.layout_region.y)
-            handled = active_popup.handle_event(event, context)
-            # Restore original coordinates
-            event.mouse_region_x = original_mouse_x
-            event.mouse_region_y = original_mouse_y
+        # Convert mouse coordinates to window coordinates for proper interaction
+        if context.region:
+            mouse_x = context.region.x + event.mouse_region_x
+            mouse_y = context.region.y + event.mouse_region_y
         else:
-            handled = active_popup.handle_event(event, context)
+            # Fallback when region is not available (use window coordinates directly)
+            mouse_x = event.mouse_x
+            mouse_y = event.mouse_y
+        
+        handled = active_popup.handle_event(event, context, mouse_x, mouse_y)
         
         # Check if popup wants to close
         if active_popup.finished:
@@ -96,6 +93,7 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             # Add draw handler to the current space
             self.space = context.space_data
             self.area = context.area  # Store the original area
+            self.popup_region = context.region  # Store the region for drawing
             if self.space is None:
                 # Try to find an available space when context.space_data is None
                 # This can happen when called from timers or background threads
@@ -119,6 +117,43 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
                 if self.space is None:
                     self.report({'ERROR'}, "No space available for popup")
                     return {'CANCELLED'}
+            
+            # Add draw handler to the current space
+            self.space = context.space_data
+            self.area = context.area  # Store the original area
+            if self.space is None:
+                # Try to find an available space when context.space_data is None
+                # This can happen when called from timers or background threads
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            self.space = area.spaces[0]
+                            self.area = area  # Store the found area
+                            break
+                    if self.space:
+                        break
+                if self.space is None:
+                    for window in context.window_manager.windows:
+                        for area in window.screen.areas:
+                            if area.type in ('TEXT_EDITOR', 'CONSOLE'):
+                                self.space = area.spaces[0]
+                                self.area = area  # Store the found area
+                                break
+                        if self.space:
+                            break
+                if self.space is None:
+                    self.report({'ERROR'}, "No space available for popup")
+                    return {'CANCELLED'}
+            
+            # Ensure we have an area for redraw
+            if self.area is None and self.space is not None:
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.spaces and area.spaces[0] == self.space:
+                            self.area = area
+                            break
+                    if self.area:
+                        break
             
             self.draw_handler = self.space.draw_handler_add(
                 self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'

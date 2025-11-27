@@ -57,25 +57,33 @@ class Widget:
 
     @property
     def global_x(self):
-        scale = get_ui_scale()
-        parent_x = self.parent.global_x if self.parent else 0
-        return int(self.x * scale) + parent_x
+        if self.parent is None:
+            # Root widget (popup) - x is already in region coordinates
+            return self.x
+        else:
+            # Child widget - x is relative to parent, needs scaling
+            scale = get_ui_scale()
+            return self.parent.global_x + int(self.x * scale)
 
     @property
     def global_y(self):
-        scale = get_ui_scale()
-        parent_y = self.parent.global_y if self.parent else 0
-        
-        # For popup children, position relative to content area top
-        if self.parent and hasattr(self.parent, 'margin'):
-            parent_y = self.parent.global_y + int(self.parent.margin * get_ui_scale())
-        
-        # Account for parent scrolling if applicable
-        scroll_offset = 0
-        if self.parent and hasattr(self.parent, 'scroll_y'):
-            scroll_offset = self.parent.scroll_y
+        if self.parent is None:
+            # Root widget (popup) - y is already in region coordinates
+            return self.y
+        else:
+            # Child widget - y is relative to parent, needs scaling
+            scale = get_ui_scale()
+            parent_y = self.parent.global_y
+            # For popup children, position relative to content area top
+            if self.parent and hasattr(self.parent, 'margin'):
+                parent_y = self.parent.global_y + int(self.parent.margin * get_ui_scale())
             
-        return int((self.y + scroll_offset) * scale) + parent_y
+            # Account for parent scrolling if applicable
+            scroll_offset = 0
+            if self.parent and hasattr(self.parent, 'scroll_y'):
+                scroll_offset = self.parent.scroll_y
+                
+            return int((self.y + scroll_offset) * scale) + parent_y
 
     def is_inside(self, x, y):
         gx = self.global_x
@@ -85,7 +93,7 @@ class Widget:
     def draw(self):
         pass
 
-    def handle_event(self, event):
+    def handle_event(self, event, mouse_x=None, mouse_y=None):
         return False
 
 class Label(Widget):
@@ -295,7 +303,7 @@ class Button(Widget):
         blf.position(0, text_x, text_y, 0)
         blf.draw(0, self.text)
 
-    def handle_event(self, event):
+    def handle_event(self, event, mouse_x=None, mouse_y=None):
         if event.type == 'LEFTMOUSE':
             if event.value == 'PRESS':
                 if self.hover:
@@ -470,7 +478,7 @@ class TextInput(Widget):
             
             current_y -= self.line_height
 
-    def handle_event(self, event):
+    def handle_event(self, event, mouse_x=None, mouse_y=None):
         if event.type == 'LEFTMOUSE':
             if event.value == 'PRESS':
                 if self.hover:
@@ -478,7 +486,9 @@ class TextInput(Widget):
                     self.is_selecting = True
                     
                     # Calculate cursor position from click
-                    pos = self._get_cursor_pos_from_mouse(event.mouse_region_x, event.mouse_region_y)
+                    click_x = mouse_x if mouse_x is not None else event.mouse_region_x
+                    click_y = mouse_y if mouse_y is not None else event.mouse_region_y
+                    pos = self._get_cursor_pos_from_mouse(click_x, click_y)
                     self.cursor_pos = pos
                     self.selection_start = pos
                     self.selection_end = pos
@@ -496,7 +506,9 @@ class TextInput(Widget):
                 return False
         
         if event.type == 'MOUSEMOVE' and self.is_selecting:
-            pos = self._get_cursor_pos_from_mouse(event.mouse_region_x, event.mouse_region_y)
+            click_x = mouse_x if mouse_x is not None else event.mouse_region_x
+            click_y = mouse_y if mouse_y is not None else event.mouse_region_y
+            pos = self._get_cursor_pos_from_mouse(click_x, click_y)
             self.cursor_pos = pos
             self.selection_end = pos
             return True
@@ -673,18 +685,23 @@ class Row(Widget):
         for child in self.children:
             child.draw()
 
-    def handle_event(self, event):
-        # Get corrected mouse coordinates for hover updates
-        mx = event.mouse_region_x
-        my = event.mouse_region_y
-        if mx == -1 and hasattr(active_popup, 'last_mouse_x'):
-            mx = active_popup.last_mouse_x
-            my = active_popup.last_mouse_y
+    def handle_event(self, event, mouse_x=None, mouse_y=None):
+        # Use provided window coordinates or convert from event
+        if mouse_x is None or mouse_y is None:
+            mouse_x = event.mouse_region_x
+            mouse_y = event.mouse_region_y
+        
+        if mouse_x != -1:
+            self.last_mouse_x = mouse_x
+            self.last_mouse_y = mouse_y
+        elif hasattr(self, 'last_mouse_x'):
+            mouse_x = self.last_mouse_x
+            mouse_y = self.last_mouse_y
 
         for child in self.children:
             # Update hover for children
-            child.hover = child.is_inside(mx, my)
-            if child.handle_event(event):
+            child.hover = child.is_inside(mouse_x, mouse_y)
+            if child.handle_event(event, mouse_x=mouse_x, mouse_y=mouse_y):
                 return True
         return False
 
@@ -1089,15 +1106,24 @@ class Popup(Widget):
                 region = None
         
         if region:
-            # Use scaled dimensions for centering calculation
-            self.x = (region.width - self.scaled_width) // 2
-            self.y = (region.height - self.scaled_height) // 2
+            # Position popup in window coordinates (add region offset)
+            self.x = region.x + (region.width - self.scaled_width) // 2
+            self.y = region.y + (region.height - self.scaled_height) // 2
         else:
-            # Fallback to default position if no region available
-            self.x = 100
-            self.y = 100
+            # Fallback to center of window if no region available
+            if context.window:
+                self.x = (context.window.width - self.scaled_width) // 2
+                self.y = (context.window.height - self.scaled_height) // 2
+            else:
+                self.x = 100
+                self.y = 100
 
     def draw(self, context):
+        # Adjust for region offset to draw in window coordinates
+        gpu.matrix.push()
+        if context.region:
+            gpu.matrix.translate((-context.region.x, -context.region.y, 0.0))
+        
         # Draw background
         bg_color = self.bg_color
         
@@ -1186,18 +1212,26 @@ class Popup(Widget):
             thumb_y = track_y + track_height - thumb_height - thumb_y_offset
             
             draw_rect(track_x, thumb_y, track_width, thumb_height, (0.4, 0.4, 0.4, 1.0))
+        
+        gpu.matrix.pop()
 
-    def handle_event(self, event, context):
-        # Get corrected mouse coordinates for hover updates
-        mx = event.mouse_region_x
-        my = event.mouse_region_y
-        if mx == -1 and hasattr(active_popup, 'last_mouse_x'):
-            mx = active_popup.last_mouse_x
-            my = active_popup.last_mouse_y
+    def handle_event(self, event, context, mouse_x=None, mouse_y=None):
+        # Use provided window coordinates or convert from event
+        if mouse_x is None or mouse_y is None:
+            mouse_x = event.mouse_region_x
+            mouse_y = event.mouse_region_y
+        
+        # Store last mouse position for when coordinates are invalid
+        if mouse_x != -1:
+            self.last_mouse_x = mouse_x
+            self.last_mouse_y = mouse_y
+        elif hasattr(self, 'last_mouse_x'):
+            mouse_x = self.last_mouse_x
+            mouse_y = self.last_mouse_y
 
         # Update hover for all children
         for child in self.children:
-            child.hover = child.is_inside(mx, my)
+            child.hover = child.is_inside(mouse_x, mouse_y)
 
         # Handle dragging
         if event.type == 'LEFTMOUSE':
@@ -1207,11 +1241,11 @@ class Popup(Widget):
                 header_height = int(45 * ui_scale)
                 header_y = self.global_y + self.scaled_height - header_height
                 
-                if (self.global_x <= event.mouse_region_x <= self.global_x + self.scaled_width and
-                    header_y <= event.mouse_region_y <= header_y + header_height):
+                if (self.global_x <= mouse_x <= self.global_x + self.scaled_width and
+                    header_y <= mouse_y <= header_y + header_height):
                     self.is_dragging = True
-                    self.drag_offset_x = event.mouse_region_x - self.global_x
-                    self.drag_offset_y = event.mouse_region_y - self.global_y
+                    self.drag_offset_x = mouse_x - self.global_x
+                    self.drag_offset_y = mouse_y - self.global_y
                     return True
             
             elif event.value == 'RELEASE':
@@ -1220,12 +1254,12 @@ class Popup(Widget):
                     return True
         
         if event.type == 'MOUSEMOVE' and self.is_dragging:
-            self.x = event.mouse_region_x - self.drag_offset_x
-            self.y = event.mouse_region_y - self.drag_offset_y
-            # Clamp to region bounds
-            region = context.region
-            self.x = max(0, min(self.x, region.width - self.scaled_width))
-            self.y = max(0, min(self.y, region.height - self.scaled_height))
+            new_x = mouse_x - self.drag_offset_x
+            new_y = mouse_y - self.drag_offset_y
+            # Keep within window bounds
+            window = context.window
+            self.x = max(0, min(new_x, window.width - self.scaled_width))
+            self.y = max(0, min(new_y, window.height - self.scaled_height))
             return True
 
         # Handle Scrolling
@@ -1241,12 +1275,11 @@ class Popup(Widget):
             if event.type == 'LEFTMOUSE':
                 if event.value == 'PRESS':
                     # Check scrollbar hit
-                    # print(f"Click: {mouse_x},{mouse_y} Track: {track_x},{track_y} {track_width}x{track_height}")
-                    if (track_x <= event.mouse_region_x <= track_x + track_width and
-                        track_y <= event.mouse_region_y <= track_y + track_height):
+                    if (track_x <= mouse_x <= track_x + track_width and
+                        track_y <= mouse_y <= track_y + track_height):
                         
                         self.is_scrolling = True
-                        self.scroll_start_y = event.mouse_region_y
+                        self.scroll_start_y = mouse_y
                         self.scroll_start_value = self.scroll_y
                         return True
                         
@@ -1263,13 +1296,13 @@ class Popup(Widget):
                 
                 if thumb_travel > 0:
                     # Mouse moves down (negative delta) -> scroll increases
-                    delta_y = self.scroll_start_y - event.mouse_region_y
+                    delta_y = self.scroll_start_y - mouse_y
                     scroll_delta = (delta_y / thumb_travel) * self.max_scroll
                     self.scroll_y = max(0, min(self.max_scroll, self.scroll_start_value + scroll_delta))
                 return True
 
             # Mouse Wheel
-            if self.is_inside(event.mouse_region_x, event.mouse_region_y):
+            if self.is_inside(mouse_x, mouse_y):
                 scroll_speed = 30 * get_ui_scale()
                 
                 if event.type == 'WHEELUPMOUSE':
@@ -1288,7 +1321,7 @@ class Popup(Widget):
 
         # Consume mouse events if they occur within the popup area
         if event.type in ('LEFTMOUSE', 'RIGHTMOUSE', 'MIDDLEMOUSE') and event.value == 'PRESS':
-            if self.is_inside(event.mouse_region_x, event.mouse_region_y):
+            if self.is_inside(mouse_x, mouse_y):
                 return True
 
         # Handle Enter key (OK)
@@ -1313,7 +1346,10 @@ class Popup(Widget):
                 self.cancelled = True
                 return True
 
-        return False
+        # Propagate to children
+        for child in self.children:
+            if child.handle_event(event, mouse_x=mouse_x, mouse_y=mouse_y):
+                return True
 
         return False
 
