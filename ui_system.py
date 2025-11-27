@@ -813,6 +813,7 @@ class Popup(Widget):
         self.border_color = get_theme_color(lambda t: t.user_interface.wcol_menu_back.outline)
         self.finished = False
         self.cancelled = False
+        self.shown = False
         self.on_enter = None
         self.on_cancel = None
         self.padding = 10
@@ -852,8 +853,11 @@ class Popup(Widget):
     
     def show(self):
         """Show this popup (calls show_popup and returns self for chaining)."""
-        from .operators import show_popup
-        show_popup(self)
+        import threading
+        if threading.current_thread() is threading.main_thread() and not self.shown:
+            from .operators import show_popup
+            show_popup(self)
+            self.shown = True
         return self
 
     def add_close_button(self, text="OK"):

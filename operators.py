@@ -63,17 +63,26 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             self.report({'ERROR'}, "No active popup definition")
             return {'CANCELLED'}
 
-        active_popup.update_layout(context)
-        
-        # Add draw handler to the current space
-        self.space = context.space_data
-        self.draw_handler = self.space.draw_handler_add(
-            self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
-        )
-        
-        context.window_manager.modal_handler_add(self)
-        context.area.tag_redraw() # Request initial redraw
-        return {'RUNNING_MODAL'}
+        try:
+            active_popup.update_layout(context)
+            
+            # Add draw handler to the current space
+            self.space = context.space_data
+            if self.space is None:
+                self.report({'ERROR'}, "No space available for popup")
+                return {'CANCELLED'}
+            
+            self.draw_handler = self.space.draw_handler_add(
+                self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
+            )
+            
+            context.window_manager.modal_handler_add(self)
+            if context.area:
+                context.area.tag_redraw() # Request initial redraw
+            return {'RUNNING_MODAL'}
+        except Exception as e:
+            print(f"Failed to show popup: {e}")
+            return {'CANCELLED'}
 
     def draw_callback(self, context):
         global active_popup
@@ -85,7 +94,8 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             self.space.draw_handler_remove(self.draw_handler, 'WINDOW')
             self.draw_handler = None
             self.space = None
-        context.area.tag_redraw()
+        if context.area:
+            context.area.tag_redraw()
 
 def show_popup(popup_instance):
     """
@@ -96,7 +106,10 @@ def show_popup(popup_instance):
     """
     global active_popup
     active_popup = popup_instance
-    bpy.ops.uitools.custom_popup('INVOKE_DEFAULT')
+    try:
+        bpy.ops.uitools.custom_popup('INVOKE_DEFAULT')
+    except Exception as e:
+        print(f"Failed to show popup: {e}")
     
     # Force immediate redraw to ensure popup appears before any blocking code
     try:

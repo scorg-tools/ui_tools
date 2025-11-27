@@ -6,6 +6,9 @@ A lightweight library for creating custom popups with text input, buttons, and a
 
 import time
 
+# Debug flag - set to True to enable debug logging
+DEBUG = False
+
 def register(operator_prefix="uitools"):
     """
     Register the UI Tools operators.
@@ -51,6 +54,7 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
         show_percentage: Whether to show percentage
         auto_close: Whether to auto-close the popup when ALL bars are done (default: True)
     """
+    if DEBUG: print("[UI_TOOLS_DEBUG] progress_bar_popup called with id={}, current={}, max={}".format(progress_id, current, max_value))
     global _shared_progress_state
     
     from .ui_system import Popup, ProgressBar
@@ -60,24 +64,41 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
     popup = _shared_progress_state['popup']
     is_new_popup = False
     
-    # Only create popup if on main thread
-    if threading.current_thread() is threading.main_thread():
-        if popup is None or popup.finished or popup.cancelled:
-            popup = Popup(title, width=500, prevent_close=True, blocking=False)
-            is_new_popup = True
-            _shared_progress_state['popup'] = popup
-            _shared_progress_state['bars'] = {}
-            _shared_progress_state['finished_ids'] = set()
+    if DEBUG: print("[UI_TOOLS_DEBUG] popup status: exists={}, finished={}, cancelled={}".format(popup is not None, popup.finished if popup else False, popup.cancelled if popup else False))
     
-    # If no popup exists and we're on a background thread, return silently
-    # User must call this function from main thread first to initialize
+    # Check if current popup is closed
+    if popup and (popup.finished or popup.cancelled):
+        if DEBUG: print("[UI_TOOLS_DEBUG] resetting closed popup")
+        _shared_progress_state['popup'] = None
+        popup = None
+    
+    # Create popup if needed
     if popup is None:
+        if DEBUG: print("[UI_TOOLS_DEBUG] creating new popup")
+        popup = Popup(title, width=500, prevent_close=True, blocking=False)
+        is_new_popup = True
+        _shared_progress_state['popup'] = popup
+        _shared_progress_state['bars'] = {}
+        _shared_progress_state['finished_ids'] = set()
+        
+        # Show popup
+        popup.show()
+    
+    # If no popup exists, return silently
+    # Popup creation is now allowed from any thread
+    if popup is None:
+        if DEBUG: print("[UI_TOOLS_DEBUG] no popup available, returning")
         return
+    
+    # Try to show popup if not shown and on main thread
+    if popup and not popup.shown and threading.current_thread() is threading.main_thread():
+        popup.show()
     
     # 2. Create or update progress bar for this ID
     bars = _shared_progress_state['bars']
     
     if progress_id not in bars:
+        if DEBUG: print("[UI_TOOLS_DEBUG] adding new progress bar for id={}".format(progress_id))
         # Remove any existing close button since we're adding a new incomplete bar (only on main thread)
         if threading.current_thread() is threading.main_thread():
             from .ui_system import Button
@@ -110,6 +131,7 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
         force_redraw = current_time - _shared_progress_state['last_update'] >= 0.25
         if force_redraw:
             _shared_progress_state['last_update'] = current_time
+        if DEBUG: print("[UI_TOOLS_DEBUG] updating progress bar for id={}, force_redraw={}".format(progress_id, force_redraw))
         bars[progress_id].update(current, max_value, text, force_redraw=force_redraw)
     
     # 3. Handle completion
@@ -119,6 +141,8 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
         # Check if ALL bars are finished
         all_finished = len(_shared_progress_state['finished_ids']) == len(bars)
         
+        if DEBUG: print("[UI_TOOLS_DEBUG] bar {} finished, all_finished={}".format(progress_id, all_finished))
+        
         if all_finished and auto_close and threading.current_thread() is threading.main_thread():
             # Enable closing and add Close button
             popup.prevent_close = False
@@ -127,6 +151,7 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
             from .ui_system import Button
             has_close_btn = any(isinstance(w, Button) and w.text == "Close" for w in popup.children)
             if not has_close_btn:
+                if DEBUG: print("[UI_TOOLS_DEBUG] adding close button")
                 popup.add_close_button("Close")
 
 def close_progress_bar_popup(progress_id=None):
@@ -137,21 +162,25 @@ def close_progress_bar_popup(progress_id=None):
         progress_id: If provided, only marks this specific ID as finished.
                      If None, closes the entire popup immediately.
     """
+    if DEBUG: print("[UI_TOOLS_DEBUG] close_progress_bar_popup called with id={}".format(progress_id))
     global _shared_progress_state
     
     popup = _shared_progress_state['popup']
     if popup and not popup.finished:
         if progress_id is None:
+            if DEBUG: print("[UI_TOOLS_DEBUG] force closing popup")
             # Force close everything
             popup.finished = True
             _shared_progress_state['popup'] = None
             _shared_progress_state['bars'] = {}
         elif progress_id in _shared_progress_state['bars']:
+            if DEBUG: print("[UI_TOOLS_DEBUG] marking bar {} as finished".format(progress_id))
             # Mark specific bar as finished
             _shared_progress_state['finished_ids'].add(progress_id)
             
             # Check if all finished
             if len(_shared_progress_state['finished_ids']) == len(_shared_progress_state['bars']):
+                if DEBUG: print("[UI_TOOLS_DEBUG] all bars finished, adding close button")
                 popup.prevent_close = False
                 from .ui_system import Button
                 has_close_btn = any(isinstance(w, Button) and w.text == "Close" for w in popup.children)
