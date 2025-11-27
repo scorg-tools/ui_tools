@@ -1,6 +1,8 @@
 # UI Tools
 
-A lightweight custom popup system for Blender addons featuring auto-layout, text input, buttons, and keyboard shortcuts.
+ui_tools is a lightweight Python library for Blender add-ons, providing a custom popup system to create interactive user interfaces such as progress bars, text inputs, buttons, and informational messages. It allows developers to build flexible, themed UI components that integrate seamlessly with Blender's design, enabling add-ons to offer better user experiences for tasks like data import, processing feedback, or configuration dialogs without being limited to standard Blender panels.
+
+The library works by utilizing Blender's BLF module for accurate text rendering and measurement, combined with space-specific draw handlers for real-time display in areas like the 3D Viewport. It employs modal operators for handling user interactions and events, ensuring responsive and interruptible popups. For multi-threading support, ui_tools enables developers to write background operations that run concurrently with the UI, providing real-time feedback through progress bars for long-running tasks; updates from background threads are throttled to maintain performance, while popup initialization and display occur on the main thread to adhere to Blender's UI threading rules, allowing add-ons to perform intensive computations without freezing the interface.
 
 ## Features
 
