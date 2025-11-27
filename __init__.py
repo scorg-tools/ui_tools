@@ -4,6 +4,8 @@ UI Tools - Custom Popup System for Blender Addons
 A lightweight library for creating custom popups with text input, buttons, and auto-layout.
 """
 
+import time
+
 def register(operator_prefix="uitools"):
     """
     Register the UI Tools operators.
@@ -29,7 +31,8 @@ def show_popup(popup_instance):
 _shared_progress_state = {
     'popup': None,
     'bars': {},  # Map of progress_id -> ProgressBar widget
-    'finished_ids': set()
+    'finished_ids': set(),
+    'last_update': 0
 }
 
 def progress_bar_popup(progress_id, current, max_value, text="", title="Progress", show_percentage=True, auto_close=True):
@@ -60,7 +63,7 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
     # Only create popup if on main thread
     if threading.current_thread() is threading.main_thread():
         if popup is None or popup.finished or popup.cancelled:
-            popup = Popup(title, prevent_close=True, blocking=False)
+            popup = Popup(title, width=500, prevent_close=True, blocking=False)
             is_new_popup = True
             _shared_progress_state['popup'] = popup
             _shared_progress_state['bars'] = {}
@@ -102,8 +105,12 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
         if hasattr(progress_bar, 'update'):
             progress_bar.update(current, max_value, text, force_redraw=True)
     else:
-        # Update existing with forced redraw
-        bars[progress_id].update(current, max_value, text, force_redraw=True)
+        # Update existing, throttle redraws to 4 times per second
+        current_time = time.time()
+        force_redraw = current_time - _shared_progress_state['last_update'] >= 0.25
+        if force_redraw:
+            _shared_progress_state['last_update'] = current_time
+        bars[progress_id].update(current, max_value, text, force_redraw=force_redraw)
     
     # 3. Handle completion
     if current >= max_value:
