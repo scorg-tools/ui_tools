@@ -327,7 +327,7 @@ class TextInput(Widget):
         self.bg_color = get_theme_color(lambda t: t.user_interface.wcol_text.inner)
         self.focus_color = get_theme_color(lambda t: t.user_interface.wcol_text.inner)
         self.text_color = get_theme_color(lambda t: t.user_interface.wcol_text.text)
-        self.selection_color = get_theme_color(lambda t: t.user_interface.wcol_text.text_sel)
+        self.selection_color = get_theme_color(lambda t: t.user_interface.wcol_text.item)
         
         self.cursor_pos = len(text)
         self.selection_start = None # Start index of selection
@@ -458,7 +458,13 @@ class TextInput(Widget):
                     x_offset = blf.dimensions(0, text_before)[0]
                     sel_width = blf.dimensions(0, text_selected)[0]
                     
-                    draw_rect(text_x + x_offset, current_y - (2 * ui_scale), sel_width, self.line_height, self.selection_color)
+                    # Get actual text height for proper highlight sizing
+                    text_height = blf.dimensions(0, "Hg")[1]  # Use tall chars with descenders
+                    
+                    # Draw selection highlight - align with text baseline
+                    # The selection should start slightly below current_y to cover the full text height
+                    selection_y = current_y - (4 * ui_scale)  # Adjust downward to cover descenders
+                    draw_rect(text_x + x_offset, selection_y, sel_width, text_height + (4 * ui_scale), self.selection_color)
 
             # Draw text
             blf.color(0, *self.text_color)
@@ -1316,7 +1322,7 @@ class Popup(Widget):
 
         # Pass event to children
         for child in reversed(self.children):
-            if child.handle_event(event):
+            if child.handle_event(event, mouse_x=mouse_x, mouse_y=mouse_y):
                 return True
 
         # Consume mouse events if they occur within the popup area
@@ -1346,12 +1352,8 @@ class Popup(Widget):
                 self.cancelled = True
                 return True
 
-        # Propagate to children
-        for child in self.children:
-            if child.handle_event(event, mouse_x=mouse_x, mouse_y=mouse_y):
-                return True
-
         return False
+
 
 # Drawing Utilities
 shader = gpu.shader.from_builtin('UNIFORM_COLOR') if hasattr(gpu.shader, 'from_builtin') else gpu.shader.from_builtin('2D_UNIFORM_COLOR')
