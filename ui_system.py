@@ -959,10 +959,17 @@ class Popup(Widget):
     def show(self):
         """Show this popup (calls show_popup and returns self for chaining)."""
         import threading
-        if threading.current_thread() is threading.main_thread() and not self.shown:
-            from .operators import show_popup
-            show_popup(self)
-            self.shown = True
+        if threading.current_thread() is threading.main_thread():
+            from .operators import is_showing_popup, popup_queue
+            if is_showing_popup and not self.shown:
+                # Queue this popup if another is already showing
+                popup_queue.append(self)
+                self.shown = True  # Mark as queued
+                return self
+            if not self.shown:
+                from .operators import show_popup
+                show_popup(self)
+                self.shown = True
         return self
 
     def add_close_button(self, text="OK"):

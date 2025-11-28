@@ -7,6 +7,12 @@ from . import ui_system
 active_popup = None
 draw_handler = None
 
+# Global popup queue for sequential display
+popup_queue = []
+
+# Flag to indicate if a popup is currently being shown
+is_showing_popup = False
+
 # Configurable operator prefix (can be set before registration)
 OPERATOR_PREFIX = "uitools"
 
@@ -18,20 +24,24 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
     def __init__(self):
         self.draw_handler = None
         self.space_type = None
+        self.active_popup = None
 
     def modal(self, context, event):
-        global active_popup
-        
-        if not active_popup:
+        global active_popup, is_showing_popup
+        if not self.active_popup:
             self.remove_handler(context)
             return {'CANCELLED'}
 
         # Check if popup wants to close
-        if active_popup.finished:
+        if self.active_popup.finished:
+            active_popup = None  # Clear the global active popup
+            is_showing_popup = False
             self.remove_handler(context)
             return {'FINISHED'}
             
-        if active_popup.cancelled:
+        if self.active_popup.cancelled:
+            active_popup = None  # Clear the global active popup
+            is_showing_popup = False
             self.remove_handler(context)
             return {'CANCELLED'}
 
@@ -56,16 +66,40 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
         if event.type == 'TIMER':
             return {'PASS_THROUGH'}
 
+        # Pass event to popup
+        # Convert mouse coordinates to window coordinates for proper interaction
+        if context.region:
+            mouse_x = context.region.x + event.mouse_region_x
+            mouse_y = context.region.y + event.mouse_region_y
+        else:
+            # Fallback when region is not available (use window coordinates directly)
+            mouse_x = event.mouse_x
+            mouse_y = event.mouse_y
+        
+        handled = self.active_popup.handle_event(event, context, mouse_x, mouse_y)
+
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             return {'PASS_THROUGH'} 
             
         # Pass through navigation events if not handled
         # This allows rotating/panning the viewport while popup is open
         # ONLY if blocking is False
-        if not handled and not active_popup.blocking:
+        if not handled and not self.active_popup.blocking:
             if event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'} or \
-               (event.type in {'LEFTMOUSE', 'RIGHTMOUSE'} and not active_popup.is_inside(event.mouse_region_x, event.mouse_region_y)):
+               (event.type in {'LEFTMOUSE', 'RIGHTMOUSE'} and not self.active_popup.is_inside(event.mouse_region_x, event.mouse_region_y)):
                 return {'PASS_THROUGH'}
+            
+        # Check if popup finished/cancelled during event handling
+        if active_popup.finished:
+            active_popup = None  # Clear the global active popup
+            is_showing_popup = False
+            self.remove_handler(context)
+            return {'FINISHED'}
+        if active_popup.cancelled:
+            active_popup = None  # Clear the global active popup
+            is_showing_popup = False
+            self.remove_handler(context)
+            return {'CANCELLED'}
             
         return {'RUNNING_MODAL'}
 
@@ -74,6 +108,8 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
         if not active_popup:
             self.report({'ERROR'}, "No active popup definition")
             return {'CANCELLED'}
+        
+        self.active_popup = active_popup
 
         try:
             active_popup.update_layout(context)
@@ -135,7 +171,7 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
                         setattr(layout_context, attr, getattr(context, attr))
                 layout_context.region = self.area.regions[-1]
                 self.layout_region = layout_context.region  # Store the actual region used
-            active_popup.update_layout(layout_context)
+            self.active_popup.update_layout(layout_context)
             
             return {'RUNNING_MODAL'}
         except Exception as e:
@@ -143,11 +179,10 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             return {'CANCELLED'}
 
     def draw_callback(self, context):
-        global active_popup
-        if active_popup:
+        if self.active_popup:
             # Layout is set once in invoke, no need to update every frame
-            active_popup.draw(context)
-            active_popup.draw(context)
+            self.active_popup.draw(context)
+            self.active_popup.draw(context)
 
     def remove_handler(self, context):
         if self.draw_handler and self.space:
@@ -160,6 +195,12 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             # Fallback if no area stored
             if context.area:
                 context.area.tag_redraw()
+        
+        # Check if there are queued popups and show the next one
+        if popup_queue:
+            next_popup = popup_queue.pop(0)
+            # Call show_popup directly to show the next popup
+            show_popup(next_popup)
 
 def show_popup(popup_instance):
     """
@@ -168,7 +209,9 @@ def show_popup(popup_instance):
     Args:
         popup_instance: A Popup instance to display
     """
-    global active_popup
+    global active_popup, is_showing_popup
+    
+    is_showing_popup = True
     active_popup = popup_instance
     try:
         bpy.ops.uitools.custom_popup('INVOKE_DEFAULT')
