@@ -83,7 +83,6 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
 
     def invoke(self, context, event):
         global active_popup
-        print(f"UITOOLS_DEBUG: invoke called. active_popup={active_popup}")
         if not active_popup:
             self.report({'ERROR'}, "No active popup definition")
             return {'CANCELLED'}
@@ -95,29 +94,27 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             self.space = context.space_data
             self.area = context.area  # Store the original area
             self.popup_region = context.region  # Store the region for drawing
-            if self.space is None:
-                # Try to find an available space when context.space_data is None
-                # This can happen when called from timers or background threads
-                for window in context.window_manager.windows:
-                    for area in window.screen.areas:
-                        if area.type == 'VIEW_3D':
-                            self.space = area.spaces[0]
-                            self.area = area  # Store the found area
-                            break
-                    if self.space:
+            
+            # Always use VIEW_3D for consistent popup display
+            self.space = None
+            self.area = None
+            
+            # Find VIEW_3D
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        self.space = area.spaces[0]
+                        self.area = area
                         break
-                if self.space is None:
-                    for window in context.window_manager.windows:
-                        for area in window.screen.areas:
-                            if area.type in ('TEXT_EDITOR', 'CONSOLE'):
-                                self.space = area.spaces[0]
-                                self.area = area  # Store the found area
-                                break
-                        if self.space:
-                            break
-                if self.space is None:
-                    self.report({'ERROR'}, "No space available for popup")
-                    return {'CANCELLED'}
+                if self.space:
+                    break
+            
+            if self.area:
+                active_popup.target_region = self.area.regions[-1]
+            
+            if self.space is None:
+                self.report({'ERROR'}, "No VIEW_3D area available for popup")
+                return {'CANCELLED'}
             
 
             
@@ -131,7 +128,6 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
                     if self.area:
                         break
             
-            print(f"UITOOLS_DEBUG: Adding draw handler to space={self.space.type}, area={self.area.type if self.area else 'None'}")
             self.draw_handler = self.space.draw_handler_add(
                 self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
             )
@@ -160,7 +156,6 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
 
     def draw_callback(self, context):
         global active_popup
-        # print("UITOOLS_DEBUG: draw_callback")
         if active_popup:
             # Layout is set once in invoke, no need to update every frame
             active_popup.draw(context)

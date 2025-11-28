@@ -210,6 +210,8 @@ def clear_all_popups():
     
     # Clear active popup
     from . import operators
+    if operators.active_popup:
+        operators.active_popup.finished = True
     operators.active_popup = None
     
     # Clear shared progress state
