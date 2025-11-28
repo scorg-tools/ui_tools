@@ -26,6 +26,15 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
             self.remove_handler(context)
             return {'CANCELLED'}
 
+        # Check if popup wants to close
+        if active_popup.finished:
+            self.remove_handler(context)
+            return {'FINISHED'}
+            
+        if active_popup.cancelled:
+            self.remove_handler(context)
+            return {'CANCELLED'}
+
         # Force redraw to keep UI updated
         if self.area:
             self.area.tag_redraw()
@@ -46,27 +55,6 @@ class UITOOLS_OT_custom_popup(bpy.types.Operator):
 
         if event.type == 'TIMER':
             return {'PASS_THROUGH'}
-
-        # Pass event to popup
-        # Convert mouse coordinates to window coordinates for proper interaction
-        if context.region:
-            mouse_x = context.region.x + event.mouse_region_x
-            mouse_y = context.region.y + event.mouse_region_y
-        else:
-            # Fallback when region is not available (use window coordinates directly)
-            mouse_x = event.mouse_x
-            mouse_y = event.mouse_y
-        
-        handled = active_popup.handle_event(event, context, mouse_x, mouse_y)
-        
-        # Check if popup wants to close
-        if active_popup.finished:
-            self.remove_handler(context)
-            return {'FINISHED'}
-            
-        if active_popup.cancelled:
-            self.remove_handler(context)
-            return {'CANCELLED'}
 
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             return {'PASS_THROUGH'} 
