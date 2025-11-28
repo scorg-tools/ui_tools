@@ -157,16 +157,30 @@ def progress_bar_popup(progress_id, current, max_value, text="", title="Progress
         
         if DEBUG: print("[UI_TOOLS_DEBUG] bar {} finished, all_finished={}".format(progress_id, all_finished))
         
-        if all_finished and auto_close and threading.current_thread() is threading.main_thread():
-            # Enable closing and add Close button
-            popup.prevent_close = False
-            
-            # Check if we already added a close button (check Button widgets only)
-            from .ui_system import Button
-            has_close_btn = any(isinstance(w, Button) and w.text == "Close" for w in popup.children)
-            if not has_close_btn:
-                if DEBUG: print("[UI_TOOLS_DEBUG] adding close button")
-                popup.add_close_button("Close")
+        if all_finished:
+            if threading.current_thread() is threading.main_thread():
+                # Enable closing and add Close button immediately
+                popup.prevent_close = False
+                
+                # Check if we already added a close button (check Button widgets only)
+                from .ui_system import Button
+                has_close_btn = any(isinstance(w, Button) and w.text == "Close" for w in popup.children)
+                if not has_close_btn:
+                    if DEBUG: print("[UI_TOOLS_DEBUG] adding close button")
+                    popup.add_close_button("Close")
+            else:
+                # Defer to main thread
+                def add_close_button_main_thread():
+                    if popup and not popup.finished and not popup.cancelled:
+                        popup.prevent_close = False
+                        from .ui_system import Button
+                        has_close_btn = any(isinstance(w, Button) and w.text == "Close" for w in popup.children)
+                        if not has_close_btn:
+                            if DEBUG: print("[UI_TOOLS_DEBUG] adding close button from background thread")
+                            popup.add_close_button("Close")
+                
+                # Use Blender's timer to run on main thread
+                bpy.app.timers.register(add_close_button_main_thread, first_interval=0.1)
 
 def close_progress_bar_popup(progress_id=None):
     """
