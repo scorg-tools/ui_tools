@@ -1176,7 +1176,10 @@ class Popup(Widget):
         # Adjust for region offset to draw in window coordinates
         gpu.matrix.push()
         if context.region:
+            # print(f"UITOOLS_DEBUG: Drawing popup. Region={context.region.type}, x={context.region.x}, y={context.region.y}, popup_x={self.global_x}, popup_y={self.global_y}")
             gpu.matrix.translate((-context.region.x, -context.region.y, 0.0))
+        else:
+            print("UITOOLS_DEBUG: No region in context for draw")
         
         # Draw background
         bg_color = self.bg_color
