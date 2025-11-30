@@ -796,13 +796,6 @@ class ProgressBar(Widget):
                     for window in bpy.context.window_manager.windows:
                         for area in window.screen.areas:
                             area.tag_redraw()
-                            
-                    # If forced, try to force immediate redraw (hack for blocking scripts)
-                    if force_redraw:
-                        try:
-                            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
-                        except:
-                            pass
                 except:
                     pass
             
