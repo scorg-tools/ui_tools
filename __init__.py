@@ -5,6 +5,7 @@ A lightweight library providing popup dialogs, progress bars, text inputs, butto
 """
 
 import time
+import bpy
 
 # Debug flag - set to True to enable debug logging
 DEBUG = False
