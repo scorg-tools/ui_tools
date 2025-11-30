@@ -1053,7 +1053,8 @@ class Popup(Widget):
         self.is_dragging = False
         self.drag_offset_x = 0
         self.drag_offset_y = 0
-        self.prevent_close = prevent_close
+        self._prevent_close = prevent_close
+        self._needs_layout_update = False
         self.blocking = blocking
         
         # Scrolling attributes
@@ -1073,6 +1074,16 @@ class Popup(Widget):
         # Add label if provided
         if label:
             self.add_widget(Label(label))
+
+    @property
+    def prevent_close(self):
+        return self._prevent_close
+        
+    @prevent_close.setter
+    def prevent_close(self, value):
+        if self._prevent_close != value:
+            self._prevent_close = value
+            self._needs_layout_update = True
 
     def add_widget(self, widget):
         widget.parent = self
@@ -1378,6 +1389,10 @@ class Popup(Widget):
                 self.y = 100
 
     def draw(self, context):
+        if self._needs_layout_update:
+            self.update_layout(context)
+            self._needs_layout_update = False
+            
         # Adjust for region offset to draw in window coordinates
         gpu.matrix.push()
         if context.region:
