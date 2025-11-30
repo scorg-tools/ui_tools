@@ -74,10 +74,10 @@ class Widget:
             # Child widget - y is relative to parent, needs scaling
             scale = get_ui_scale()
             parent_y = self.parent.global_y
-            # For popup children, position relative to content area top
-            if self.parent and hasattr(self.parent, 'margin'):
-                parent_y = self.parent.global_y + int(self.parent.margin * get_ui_scale())
-                
+            # For popup children, position relative to popup top
+            if self.parent and isinstance(self.parent, Popup):
+                if not self.parent.is_scrollable:
+                    parent_y += self.parent.title_height - int(self.parent.margin * scale)
             return int(self.y * scale) + parent_y
 
     def is_inside(self, x, y):
@@ -880,6 +880,135 @@ class ProgressBar(Widget):
             # Disable scissor test
             gpu.state.scissor_test_set(False)
 
+class Scrollbar(Widget):
+    def __init__(self, orientation='vertical', width=16, parent=None):
+        super().__init__(0, 0, width, 100, parent)
+        self.orientation = orientation  # 'vertical' or 'horizontal'
+        self.scroll_offset = 0
+        self.max_scroll = 0
+        self.thumb_size = 40
+        self.min_thumb_size = 40
+        self.thumb_position = 0
+        self.is_dragging = False
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+        self.drag_start_offset = 0
+        self.on_scroll = None  # Callback for scroll changes
+        
+        # Theme colors
+        self.track_color = get_theme_color(lambda t: t.user_interface.wcol_scroll.item)
+        self.thumb_color = get_theme_color(lambda t: t.user_interface.wcol_scroll.slider)
+        self.hover_thumb_color = get_theme_color(lambda t: (*t.user_interface.wcol_scroll.slider[:3], 0.8))  # Slightly transparent
+
+    def set_scroll_info(self, scroll_offset, max_scroll, visible_size):
+        self.scroll_offset = scroll_offset
+        self.max_scroll = max_scroll
+        if max_scroll > 0:
+            self.thumb_size = max(self.min_thumb_size, (visible_size / (visible_size + max_scroll)) * self.height)
+            self.thumb_position = (scroll_offset / max_scroll) * (self.height - self.thumb_size)
+        else:
+            self.thumb_size = self.height
+            self.thumb_position = 0
+
+    def draw(self):
+        ui_scale = get_ui_scale()
+        scaled_width = self.scaled_width
+        scaled_height = self.scaled_height
+        scaled_thumb_size = int(self.thumb_size * ui_scale)
+        scaled_thumb_pos = int(self.thumb_position * ui_scale)
+        
+        # Draw track
+        draw_rect(self.global_x, self.global_y, scaled_width, scaled_height, self.track_color)
+        
+        # Draw thumb
+        thumb_color = self.hover_thumb_color if self.hover else self.thumb_color
+        if self.orientation == 'vertical':
+            # Draw from top (Y-up coordinate system)
+            draw_rect(self.global_x, self.global_y + scaled_height - scaled_thumb_size - scaled_thumb_pos, scaled_width, scaled_thumb_size, thumb_color)
+        else:
+            draw_rect(self.global_x + scaled_thumb_pos, self.global_y, scaled_thumb_size, scaled_height, thumb_color)
+
+    def is_inside_thumb(self, mouse_x, mouse_y):
+        ui_scale = get_ui_scale()
+        scaled_thumb_size = int(self.thumb_size * ui_scale)
+        scaled_thumb_pos = int(self.thumb_position * ui_scale)
+        scaled_height = self.scaled_height
+        scaled_width = self.scaled_width
+        
+        if self.orientation == 'vertical':
+            thumb_y = self.global_y + scaled_height - scaled_thumb_size - scaled_thumb_pos
+            return (self.global_x <= mouse_x <= self.global_x + scaled_width and
+                    thumb_y <= mouse_y <= thumb_y + scaled_thumb_size)
+        else:
+            return (self.global_x + scaled_thumb_pos <= mouse_x <= self.global_x + scaled_thumb_pos + scaled_thumb_size and
+                    self.global_y <= mouse_y <= self.global_y + scaled_height)
+
+    def handle_event(self, event, mouse_x=None, mouse_y=None):
+        if mouse_x is None or mouse_y is None:
+            return False
+            
+        # Update hover
+        self.hover = self.is_inside(mouse_x, mouse_y)
+        ui_scale = get_ui_scale()
+        
+        if event.type == 'LEFTMOUSE':
+            if event.value == 'PRESS':
+                if self.is_inside_thumb(mouse_x, mouse_y):
+                    self.is_dragging = True
+                    self.drag_start_x = mouse_x
+                    self.drag_start_y = mouse_y
+                    self.drag_start_offset = self.scroll_offset
+                    return True
+                elif self.is_inside(mouse_x, mouse_y):
+                    # Click on track - jump to position
+                    if self.orientation == 'vertical':
+                        # Calculate position from top (in pixels)
+                        click_y_from_top_px = (self.global_y + self.scaled_height) - mouse_y
+                        click_y_from_top = click_y_from_top_px / ui_scale
+                        
+                        # Center thumb on click
+                        new_thumb_pos = max(0, min(click_y_from_top - self.thumb_size / 2, self.height - self.thumb_size))
+                        new_offset = (new_thumb_pos / (self.height - self.thumb_size)) * self.max_scroll if self.height > self.thumb_size else 0
+                    else:
+                        click_pos_px = mouse_x - self.global_x
+                        click_pos = click_pos_px / ui_scale
+                        new_thumb_pos = max(0, min(click_pos - self.thumb_size / 2, self.width - self.thumb_size))
+                        new_offset = (new_thumb_pos / (self.width - self.thumb_size)) * self.max_scroll if self.width > self.thumb_size else 0
+                    
+                    if self.on_scroll:
+                        self.on_scroll(new_offset)
+                    return True
+            elif event.value == 'RELEASE':
+                was_dragging = self.is_dragging
+                self.is_dragging = False
+                return was_dragging
+        
+        elif event.type == 'MOUSEMOVE' and self.is_dragging:
+            if self.orientation == 'vertical':
+                delta_px = self.drag_start_y - mouse_y
+                delta = delta_px / ui_scale
+                
+                initial_thumb_pos = (self.drag_start_offset / self.max_scroll) * (self.height - self.thumb_size) if self.max_scroll > 0 else 0
+                # Add delta because Y is up, thumb moves down as pos increases
+                new_thumb_pos = max(0, min(initial_thumb_pos + delta, self.height - self.thumb_size))
+                new_offset = (new_thumb_pos / (self.height - self.thumb_size)) * self.max_scroll if (self.height - self.thumb_size) > 0 else 0
+            else:
+                delta_px = mouse_x - self.drag_start_x
+                delta = delta_px / ui_scale
+                
+                track_size = self.width - self.thumb_size
+                if track_size > 0:
+                    new_thumb_pos = max(0, min(self.drag_start_offset / self.max_scroll * track_size + delta, track_size))
+                    new_offset = (new_thumb_pos / track_size) * self.max_scroll
+                else:
+                    new_offset = 0
+            
+            if self.on_scroll:
+                self.on_scroll(new_offset)
+            return True
+        
+        return False
+
 class WidgetBuilder:
     def __init__(self, parent):
         self.parent = parent
@@ -926,6 +1055,14 @@ class Popup(Widget):
         self.drag_offset_y = 0
         self.prevent_close = prevent_close
         self.blocking = blocking
+        
+        # Scrolling attributes
+        self.scroll_offset = 0
+        self.max_scroll = 0
+        self.is_scrollable = False
+        self.scrollbar = None
+        self.content_height = 0
+        self.visible_content_height = 0
         
         # Helper for adding widgets
         self.add = WidgetBuilder(self)
@@ -995,6 +1132,7 @@ class Popup(Widget):
 
         # Pass 2: Update Children Layout (Text Wrapping)
         # We pass the available width to children so they can wrap/resize
+        # Initially assume no scrollbar
         content_width = self.width - (2 * self.margin)
         
         for child in self.children:
@@ -1005,7 +1143,9 @@ class Popup(Widget):
                 child.update_layout()
 
         # Pass 3: Calculate Height and Position
-        total_content_height = self.title_height + self.padding
+        # Use unscaled title height for calculation
+        unscaled_title_height = 45
+        total_content_height = unscaled_title_height + self.padding
         total_child_height = 0
         
         for i, child in enumerate(self.children):
@@ -1018,8 +1158,57 @@ class Popup(Widget):
         # Add bottom margin
         total_content_height += self.margin
         
-        # Update popup height if auto
-        if self.auto_height:
+        # Store content height for scrolling calculations
+        self.content_height = total_child_height
+        
+        # Determine if scrolling is needed
+        max_height = self._get_max_popup_height()
+        self.is_scrollable = total_content_height > max_height
+        
+        if self.is_scrollable:
+            # Calculate scaled values
+            ui_scale = get_ui_scale()
+            scaled_margin = int(self.margin * ui_scale)
+            # set scrollbar width
+            scrollbar_width = 16
+
+            # Set popup height to maximum allowed
+            self.height = max_height
+            self.visible_content_height = int((self.scaled_height - self.title_height) / ui_scale)
+            
+            # Calculate max scroll
+            self.max_scroll = max(0, self.content_height - self.visible_content_height)
+            
+            # Clamp scroll offset
+            self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
+            
+            # Re-layout children with reduced width for scrollbar and margins
+            content_width = self.width - scrollbar_width - 2 * self.margin
+            for child in self.children:
+                if hasattr(child, 'update_layout_custom'):
+                    child.update_layout_custom(content_width)
+                else:
+                    child.update_layout()
+            
+            # Create or update scrollbar
+            if self.scrollbar is None:
+                self.scrollbar = Scrollbar('vertical', scrollbar_width, self)
+                self.scrollbar.on_scroll = self._on_scroll
+            self.scrollbar.height = self.visible_content_height
+            self.scrollbar.set_scroll_info(self.scroll_offset, self.max_scroll, self.visible_content_height)
+            self.scrollbar.x = self.width - self.scrollbar.width
+            self.scrollbar.y = 0
+        else:
+            # No scrolling needed
+            self.height = total_content_height if self.auto_height else self.height
+            self.scroll_offset = 0
+            self.max_scroll = 0
+            content_width = self.width - (2 * self.margin)  # No scrollbar
+            if self.scrollbar:
+                self.scrollbar = None
+        
+        # Update popup height if auto and not scrollable
+        if self.auto_height and not self.is_scrollable:
             # Store old center for expansion
             ui_scale = get_ui_scale()
             old_height_scaled = self.scaled_height
@@ -1049,16 +1238,15 @@ class Popup(Widget):
                 self.y = int(new_y)
         
         # Now position children
-        # Position relative to content area top, from bottom up for correct order
-        # Calculate total height of children + paddings
-        # We already calculated total_child_height above
-        
-        current_y = total_child_height
+        # Position relative to content area top, accounting for scroll offset
+        # For scrolling, start from visible + scroll_offset to show top content at scroll_offset=0
+        start_y = (self.visible_content_height + self.scroll_offset) if self.is_scrollable else total_child_height
+        current_y = start_y
         
         for child in self.children:
             current_y -= child.height
             child.x = self.margin
-            child.width = self.width - (2 * self.margin)
+            child.width = content_width
             child.y = current_y
             
             # Update child layout (e.g. Row) - might need re-update if position changed?
@@ -1067,6 +1255,26 @@ class Popup(Widget):
             child.update_layout()
             
             current_y -= self.padding
+
+    def _get_max_popup_height(self):
+        """Get the maximum height for the popup (75% of region height)"""
+        try:
+            region = getattr(self, 'target_region', None)
+            if region:
+                return int(region.height * 0.75)
+            else:
+                # Fallback to window height
+                window = bpy.context.window
+                if window:
+                    return int(window.height * 0.75)
+        except:
+            pass
+        return 600  # Ultimate fallback
+
+    def _on_scroll(self, new_offset):
+        """Callback for scrollbar scroll events"""
+        self.scroll_offset = max(0, min(new_offset, self.max_scroll))
+        self.layout_children()  # Re-layout to update positions
 
     @property
     def global_x(self):
@@ -1079,6 +1287,9 @@ class Popup(Widget):
         return self.y
 
     def update_layout(self, context):
+        # Store the target region for height calculations
+        self.target_region = context.region
+        
         # Add default OK button if no buttons exist and prevent_close is False
         has_button = False
         for child in self.children:
@@ -1104,10 +1315,7 @@ class Popup(Widget):
             if not self.on_enter:
                 self.on_enter = default_ok
         
-        # First, layout children to determine height
-        self.layout_children()
-        
-        # Center popup in region
+        # Determine the target region for positioning and height calculations
         region = getattr(self, 'target_region', context.region)
         if region is None:
             # Fallback when called from timer/thread - get the first available region
@@ -1132,6 +1340,13 @@ class Popup(Widget):
                 # Ultimate fallback - use default dimensions
                 region = None
         
+        # Set the final target region
+        self.target_region = region
+        
+        # Now layout children to determine height (uses target_region)
+        self.layout_children()
+        
+        # Center popup in region
         if region:
             # Position popup in window coordinates (add region offset)
             self.x = region.x + (region.width - self.scaled_width) // 2
@@ -1186,16 +1401,36 @@ class Popup(Widget):
         blf.draw(0, self.title)
         
         # Draw Children
+        if self.is_scrollable:
+            # Set scissor test to clip content to popup area below title with margins
+            content_y = self.global_y
+            content_height = self.scaled_height - header_height
+            scaled_margin = int(self.margin * ui_scale)
+            scissor_x = int(self.global_x + scaled_margin - context.region.x)
+            scissor_y = int(content_y - context.region.y)
+            scissor_width = int(self.scaled_width - self.scrollbar.scaled_width - 2 * scaled_margin)
+            scissor_height = int(content_height)
+            gpu.state.scissor_test_set(True)
+            gpu.state.scissor_set(scissor_x, scissor_y, scissor_width, scissor_height)
+        
         for child in self.children:
             child.draw()
+        
+        if self.is_scrollable:
+            # Disable scissor test
+            gpu.state.scissor_test_set(False)
+            
+            # Draw scrollbar
+            if self.scrollbar:
+                self.scrollbar.draw()
         
         gpu.matrix.pop()
 
     def handle_event(self, event, context, mouse_x=None, mouse_y=None):
         # Use provided window coordinates or convert from event
         if mouse_x is None or mouse_y is None:
-            mouse_x = event.mouse_region_x
-            mouse_y = event.mouse_region_y
+            mouse_x = event.mouse_x
+            mouse_y = event.mouse_y
         
         # Store last mouse position for when coordinates are invalid
         if mouse_x != -1:
@@ -1208,6 +1443,24 @@ class Popup(Widget):
         # Update hover for all children
         for child in self.children:
             child.hover = child.is_inside(mouse_x, mouse_y)
+        
+        # Update scrollbar hover
+        if self.scrollbar:
+            self.scrollbar.hover = self.scrollbar.is_inside(mouse_x, mouse_y)
+
+        # Handle mouse wheel scrolling
+        if self.is_scrollable and event.type in ('WHEELUPMOUSE', 'WHEELDOWNMOUSE'):
+            scroll_amount = 20  # Pixels to scroll per wheel event
+            if event.type == 'WHEELDOWNMOUSE':
+                # Wheel down -> Scroll down -> Increase offset
+                pass 
+            else:
+                # Wheel up -> Scroll up -> Decrease offset
+                scroll_amount = -scroll_amount
+            
+            new_offset = self.scroll_offset + scroll_amount
+            self._on_scroll(new_offset)
+            return True
 
         # Handle dragging
         if event.type == 'LEFTMOUSE':
@@ -1236,6 +1489,10 @@ class Popup(Widget):
             window = context.window
             self.x = max(0, min(new_x, window.width - self.scaled_width))
             self.y = max(0, min(new_y, window.height - self.scaled_height))
+            return True
+
+        # Handle scrollbar events
+        if self.scrollbar and self.scrollbar.handle_event(event, mouse_x, mouse_y):
             return True
 
         # Pass event to children
