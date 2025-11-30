@@ -1172,23 +1172,40 @@ class Popup(Widget):
             # set scrollbar width
             scrollbar_width = 16
 
-            # Set popup height to maximum allowed
-            self.height = max_height
+            # Set popup height to maximum allowed (convert pixels to unscaled)
+            self.height = int(max_height / ui_scale)
             self.visible_content_height = int((self.scaled_height - self.title_height) / ui_scale)
             
-            # Calculate max scroll
+            # Calculate max scroll (initial estimate)
             self.max_scroll = max(0, self.content_height - self.visible_content_height)
-            
-            # Clamp scroll offset
-            self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
             
             # Re-layout children with reduced width for scrollbar and margins
             content_width = self.width - scrollbar_width - 2 * self.margin
-            for child in self.children:
+            
+            # Recalculate height as children might have grown (e.g. text wrapping)
+            new_total_child_height = 0
+            
+            for i, child in enumerate(self.children):
                 if hasattr(child, 'update_layout_custom'):
                     child.update_layout_custom(content_width)
                 else:
                     child.update_layout()
+                
+                new_total_child_height += child.height
+                if i < len(self.children) - 1:
+                    new_total_child_height += self.padding
+            
+            # Add bottom margin
+            new_total_child_height += self.margin
+
+            # Update content height
+            self.content_height = new_total_child_height
+            
+            # Update max scroll with new height
+            self.max_scroll = max(0, self.content_height - self.visible_content_height)
+            
+            # Clamp scroll offset again just in case
+            self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
             
             # Create or update scrollbar
             if self.scrollbar is None:
@@ -1243,7 +1260,7 @@ class Popup(Widget):
         start_y = (self.visible_content_height + self.scroll_offset) if self.is_scrollable else total_child_height
         current_y = start_y
         
-        for child in self.children:
+        for i, child in enumerate(self.children):
             current_y -= child.height
             child.x = self.margin
             child.width = content_width
