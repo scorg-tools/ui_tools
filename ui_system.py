@@ -77,13 +77,8 @@ class Widget:
             # For popup children, position relative to content area top
             if self.parent and hasattr(self.parent, 'margin'):
                 parent_y = self.parent.global_y + int(self.parent.margin * get_ui_scale())
-            
-            # Account for parent scrolling if applicable
-            scroll_offset = 0
-            if self.parent and hasattr(self.parent, 'scroll_y'):
-                scroll_offset = self.parent.scroll_y
                 
-            return int((self.y + scroll_offset) * scale) + parent_y
+            return int(self.y * scale) + parent_y
 
     def is_inside(self, x, y):
         gx = self.global_x
@@ -932,15 +927,6 @@ class Popup(Widget):
         self.prevent_close = prevent_close
         self.blocking = blocking
         
-        # Scrolling support
-        self.scroll_y = 0
-        self.max_scroll = 0
-        self.content_height = 0
-        self.viewport_height = 0
-        self.is_scrolling = False
-        self.scroll_start_y = 0
-        self.scroll_start_value = 0
-        
         # Helper for adding widgets
         self.add = WidgetBuilder(self)
         
@@ -1049,23 +1035,7 @@ class Popup(Widget):
             try:
                 region = bpy.context.region
                 if region:
-                    # Limit height to 75% of screen
-                    max_allowed_height = int(region.height * 0.75)
-                    
-                    if total_content_height > max_allowed_height:
-                        self.height = max_allowed_height
-                        self.content_height = total_content_height
-                        self.viewport_height = self.height - self.title_height - self.margin
-                        
-                        # Calculate max scroll (positive value)
-                        # Content needs to move UP, so scroll_y becomes positive
-                        # Max scroll is difference between content height and viewport height
-                        # Use total_child_height for accurate scroll range
-                        self.max_scroll = max(0, total_child_height - self.viewport_height + self.padding)
-                    else:
-                        self.height = total_content_height
-                        self.max_scroll = 0
-                        self.scroll_y = 0
+                    self.height = total_content_height
                     
                     # Recalculate position to keep centered
                     new_height_scaled = self.scaled_height
@@ -1084,10 +1054,6 @@ class Popup(Widget):
         # We already calculated total_child_height above
         
         current_y = total_child_height
-        
-        # Apply scroll offset to start position so top content is visible
-        if self.max_scroll > 0:
-            current_y -= self.max_scroll
         
         for child in self.children:
             current_y -= child.height
@@ -1219,60 +1185,9 @@ class Popup(Widget):
         blf.position(0, title_x, title_y, 0)
         blf.draw(0, self.title)
         
-        # Draw Children with Clipping if scrolling is active
-        if self.max_scroll > 0:
-            # Enable Scissor Test
-            # Scissor coordinates are region coordinates
-            scissor_x = int(self.global_x)
-            scissor_y = int(self.global_y + self.margin * ui_scale)
-            scissor_w = int(self.scaled_width)
-            scissor_h = int(self.scaled_height - header_height - self.margin * ui_scale)
-            
-            if self.debug_clipping:
-                # Draw red outline
-                draw_rect_border(scissor_x, scissor_y, scissor_w, scissor_h, (1, 0, 0, 1), 2)
-            
-            # Always enable clipping
-            gpu.state.scissor_set(scissor_x, scissor_y, scissor_w, scissor_h)
-            gpu.state.scissor_test_set(True)
-            
+        # Draw Children
         for child in self.children:
             child.draw()
-            
-        if self.max_scroll > 0:
-            # Disable Scissor Test
-            gpu.state.scissor_test_set(False)
-            
-            # Draw Scrollbar
-            # Track
-            track_width = int(10 * ui_scale)
-            track_x = self.global_x + self.scaled_width - track_width - (5 * ui_scale)
-            track_y = self.global_y + self.margin * ui_scale
-            track_height = self.scaled_height - header_height - (2 * self.margin * ui_scale)
-            
-            draw_rect(track_x, track_y, track_width, track_height, (0.1, 0.1, 0.1, 1.0))
-            
-            # Thumb
-            # Calculate thumb height based on viewport/content ratio
-            ratio = self.viewport_height / self.content_height
-            thumb_height = max(int(track_height * ratio), int(30 * ui_scale))
-            
-            # Calculate thumb position
-            # scroll_y is positive (0 to max_scroll)
-            # map scroll_y range [0, max_scroll] to [track_top, track_bottom]
-            # When scroll_y = 0 (top), thumb should be at top
-            # When scroll_y = max_scroll (bottom), thumb should be at bottom
-            
-            scroll_ratio = self.scroll_y / self.max_scroll if self.max_scroll != 0 else 0
-            
-            # Available travel for thumb
-            thumb_travel = track_height - thumb_height
-            thumb_y_offset = int(thumb_travel * scroll_ratio)
-            
-            # Thumb Y (starts from top of track)
-            thumb_y = track_y + track_height - thumb_height - thumb_y_offset
-            
-            draw_rect(track_x, thumb_y, track_width, thumb_height, (0.4, 0.4, 0.4, 1.0))
         
         gpu.matrix.pop()
 
@@ -1322,58 +1237,6 @@ class Popup(Widget):
             self.x = max(0, min(new_x, window.width - self.scaled_width))
             self.y = max(0, min(new_y, window.height - self.scaled_height))
             return True
-
-        # Handle Scrolling
-        if self.max_scroll > 0:
-            # Scrollbar Dragging
-            ui_scale = get_ui_scale()
-            header_height = int(45 * ui_scale)
-            track_width = int(10 * ui_scale)
-            track_x = self.global_x + self.scaled_width - track_width - (5 * ui_scale)
-            track_y = self.global_y + self.margin * ui_scale
-            track_height = self.scaled_height - header_height - (2 * self.margin * ui_scale)
-            
-            if event.type == 'LEFTMOUSE':
-                if event.value == 'PRESS':
-                    # Check scrollbar hit
-                    if (track_x <= mouse_x <= track_x + track_width and
-                        track_y <= mouse_y <= track_y + track_height):
-                        
-                        self.is_scrolling = True
-                        self.scroll_start_y = mouse_y
-                        self.scroll_start_value = self.scroll_y
-                        return True
-                        
-                elif event.value == 'RELEASE':
-                    if self.is_scrolling:
-                        self.is_scrolling = False
-                        return True
-            
-            if event.type == 'MOUSEMOVE' and self.is_scrolling:
-                # Calculate sensitivity
-                ratio = self.viewport_height / self.content_height
-                thumb_height = max(int(track_height * ratio), int(30 * ui_scale))
-                thumb_travel = track_height - thumb_height
-                
-                if thumb_travel > 0:
-                    # Mouse moves down (negative delta) -> scroll increases
-                    delta_y = self.scroll_start_y - mouse_y
-                    scroll_delta = (delta_y / thumb_travel) * self.max_scroll
-                    self.scroll_y = max(0, min(self.max_scroll, self.scroll_start_value + scroll_delta))
-                return True
-
-            # Mouse Wheel
-            if self.is_inside(mouse_x, mouse_y):
-                scroll_speed = 30 * get_ui_scale()
-                
-                if event.type == 'WHEELUPMOUSE':
-                    # Scroll UP (view moves up, content moves down) -> Decrease scroll_y
-                    self.scroll_y = max(0, self.scroll_y - scroll_speed)
-                    return True
-                elif event.type == 'WHEELDOWNMOUSE':
-                    # Scroll DOWN (view moves down, content moves up) -> Increase scroll_y
-                    self.scroll_y = min(self.max_scroll, self.scroll_y + scroll_speed)
-                    return True
 
         # Pass event to children
         for child in reversed(self.children):
